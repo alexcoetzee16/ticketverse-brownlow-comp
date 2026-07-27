@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap");
+
+::selection {
+  background: theme("colors.tv.gold");
+  color: theme("colors.tv.bg");
+}
+
+/* Scoreboard-style number chip used for pick numbers / draft positions */
+.pick-chip {
+  @apply inline-flex items-center justify-center w-8 h-8 rounded-full bg-tv-surface2 border border-tv-border font-mono text-sm text-tv-gold;
+}
