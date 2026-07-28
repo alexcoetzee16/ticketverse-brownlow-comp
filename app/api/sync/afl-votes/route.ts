@@ -19,6 +19,7 @@ interface AflApiPlayer {
   firstName: string;
   surname: string;
   totalVotes: number;
+  rounds: Record<string, Array<{ providerId?: string; points?: number; played?: boolean; bye?: boolean }>>;
 }
 interface AflApiResponse {
   pageInfo: { numEntries: number; numPages: number; page: number; pageSize: number };
@@ -106,8 +107,65 @@ export async function POST(req: NextRequest) {
 
   await Promise.all(updates);
 
-  // Mark the ladder as live once a sync has run successfully.
-  await db.from("live_count_state").update({ is_live: true }).eq("id", 1);
+  // --- Automatic round-completion detection ---
+  // Build the set of match provider ids that have had votes revealed, by scanning every
+  // player's round entries (not just our drafted ones — a match is "counted" the moment
+  // ANY player anywhere has a real vote entry against it).
+  const countedMatchIds = new Set<string>();
+  for (const ap of aflPlayers) {
+    for (const entries of Object.values(ap.rounds ?? {})) {
+      for (const entry of entries) {
+        if (entry.providerId && typeof entry.points === "number") {
+          countedMatchIds.add(entry.providerId);
+        }
+      }
+    }
+  }
 
-  return NextResponse.json({ success: true, matched, totalAflPlayers: aflPlayers.length });
+  const { data: fixtures } = await db
+    .from("brownlow_games")
+    .select("afl_provider_id, round_name, round_number")
+    .not("afl_provider_id", "is", null);
+
+  let latestCompleteRound: { name: string; number: number } | null = null;
+
+  if (fixtures && fixtures.length > 0) {
+    const byRound = new Map<number, { name: string; total: number; counted: number }>();
+    for (const f of fixtures) {
+      const bucket = byRound.get(f.round_number) ?? { name: f.round_name, total: 0, counted: 0 };
+      bucket.total++;
+      if (f.afl_provider_id && countedMatchIds.has(f.afl_provider_id)) bucket.counted++;
+      byRound.set(f.round_number, bucket);
+    }
+
+    const completeRounds = Array.from(byRound.entries())
+      .filter(([, b]) => b.total > 0 && b.counted === b.total)
+      .sort((a, b) => b[0] - a[0]); // highest round_number first
+
+    if (completeRounds.length > 0) {
+      const [number, bucket] = completeRounds[0];
+      latestCompleteRound = { name: bucket.name, number };
+    }
+  }
+
+  // Mark the ladder as live, and advance the round banner if we found a further-along
+  // complete round than what's currently stored (never goes backward).
+  const { data: currentState } = await db
+    .from("live_count_state")
+    .select("updated_through_round")
+    .eq("id", 1)
+    .single();
+
+  const updatePayload: { is_live: boolean; updated_through_round?: string } = { is_live: true };
+  if (latestCompleteRound && latestCompleteRound.name !== currentState?.updated_through_round) {
+    updatePayload.updated_through_round = latestCompleteRound.name;
+  }
+  await db.from("live_count_state").update(updatePayload).eq("id", 1);
+
+  return NextResponse.json({
+    success: true,
+    matched,
+    totalAflPlayers: aflPlayers.length,
+    updatedThroughRound: latestCompleteRound?.name ?? currentState?.updated_through_round ?? null,
+  });
 }

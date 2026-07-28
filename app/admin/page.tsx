@@ -88,6 +88,17 @@ export default function AdminPage() {
     setStatus(res.ok ? "Season ID saved." : json.error);
   }
 
+  async function loadFixtures() {
+    setStatus("Loading fixtures…");
+    const res = await fetch("/api/admin/load-fixtures", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminPin }),
+    });
+    const json = await res.json();
+    setStatus(res.ok ? `Loaded ${json.loaded} fixtures.` : json.error);
+  }
+
   async function runSyncOnce() {
     const res = await fetch("/api/sync/afl-votes", {
       method: "POST",
@@ -99,7 +110,11 @@ export default function AdminPage() {
       setStatus(json.error);
       setLastSync(`Error at ${new Date().toLocaleTimeString()}`);
     } else {
-      setLastSync(`${json.matched} of your drafted players updated — ${new Date().toLocaleTimeString()}`);
+      setLastSync(
+        `${json.matched} players updated, through ${json.updatedThroughRound ?? "no completed rounds yet"} — ${new Date().toLocaleTimeString()}`
+      );
+      if (json.updatedThroughRound) setRoundLabel(json.updatedThroughRound);
+      setIsLive(true);
     }
   }
 
@@ -217,6 +232,12 @@ export default function AdminPage() {
           >
             Save season ID
           </button>
+          <button
+            onClick={loadFixtures}
+            className="rounded-md bg-tv-surface2 border border-tv-border hover:bg-tv-purple px-4 py-2 text-sm font-semibold"
+          >
+            Load fixtures
+          </button>
         </div>
         <div className="flex gap-3 items-center">
           {!syncRunning ? (
@@ -239,26 +260,14 @@ export default function AdminPage() {
         {lastSync && <p className="text-xs text-tv-muted">{lastSync}</p>}
       </div>
 
-      <div className="bg-tv-surface border border-tv-border rounded-lg p-5 space-y-3">
-        <h2 className="font-semibold text-tv-purpleLight">Ladder banner</h2>
-        <div className="flex gap-3 items-center flex-wrap">
-          <input
-            type="text"
-            placeholder="e.g. Round 14"
-            value={roundLabel}
-            onChange={(e) => setRoundLabel(e.target.value)}
-            className="rounded-md bg-tv-surface2 border border-tv-border px-3 py-2"
-          />
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={isLive} onChange={(e) => setIsLive(e.target.checked)} />
-            Live now
-          </label>
-          <button
-            onClick={updateBanner}
-            className="rounded-md bg-tv-purple hover:bg-tv-purpleLight px-4 py-2 text-sm font-semibold"
-          >
-            Update banner
-          </button>
+      <div className="bg-tv-surface border border-tv-border rounded-lg p-5 space-y-2">
+        <h2 className="font-semibold text-tv-purpleLight">Ladder status (automatic)</h2>
+        <p className="text-sm text-tv-muted">
+          This advances itself once live sync is running — no manual entry needed.
+        </p>
+        <div className="flex items-center gap-2 text-sm">
+          <span className={`w-2 h-2 rounded-full ${isLive ? "bg-tv-gold animate-pulse" : "bg-tv-muted/40"}`} />
+          <span>{isLive ? "Live" : "Not live"} — showing through {roundLabel || "—"}</span>
         </div>
       </div>
 
