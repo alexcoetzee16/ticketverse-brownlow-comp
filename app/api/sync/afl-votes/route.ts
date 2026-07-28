@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
 
   let matched = 0;
   let unmatched: string[] = [];
-  const updates: Promise<any>[] = [];
+  const updates: any[] = [];
 
   for (const ap of aflPlayers) {
     const ourPlayer = byAflId.get(ap.id) ?? byName.get(normalizeName(ap.firstName, ap.surname));
