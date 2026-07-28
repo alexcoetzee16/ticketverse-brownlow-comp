@@ -34,6 +34,30 @@ export default function AdminPage() {
   const [syncRunning, setSyncRunning] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [syncIntervalId, setSyncIntervalId] = useState<ReturnType<typeof setInterval> | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+
+  async function submitPin() {
+    setVerifying(true);
+    setPinError(null);
+    try {
+      const res = await fetch("/api/admin/verify-pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adminPin: pinInput }),
+      });
+      if (res.ok) {
+        setAdminPin(pinInput); // reuse the verified PIN for subsequent admin actions
+        setUnlocked(true);
+      } else {
+        setPinError("Incorrect PIN.");
+      }
+    } finally {
+      setVerifying(false);
+    }
+  }
 
   async function load() {
     const [{ data: g }, { data: p }, { data: v }, { data: s }, { data: cfg }] = await Promise.all([
@@ -94,12 +118,13 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
+    if (!unlocked) return;
     load();
     return () => {
       if (syncIntervalId) clearInterval(syncIntervalId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [unlocked]);
 
   const gamePlayers = useMemo(() => {
     if (!selectedGame) return [];
@@ -139,17 +164,36 @@ export default function AdminPage() {
     else setStatus("Ladder banner updated.");
   }
 
+  if (!unlocked) {
+    return (
+      <div className="max-w-sm mx-auto text-center py-24">
+        <h1 className="font-display text-4xl text-tv-gold mb-6">COUNT NIGHT ADMIN</h1>
+        <input
+          type="password"
+          inputMode="numeric"
+          value={pinInput}
+          onChange={(e) => setPinInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submitPin()}
+          placeholder="Admin PIN"
+          autoFocus
+          className="w-full rounded-md bg-tv-surface2 border border-tv-border px-3 py-2 tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-tv-purple mb-3"
+        />
+        <button
+          onClick={submitPin}
+          disabled={verifying || !pinInput}
+          className="w-full rounded-md bg-tv-purple hover:bg-tv-purpleLight disabled:opacity-40 text-white font-semibold py-2.5"
+        >
+          {verifying ? "Checking…" : "Enter"}
+        </button>
+        {pinError && <p className="text-red-400 text-sm mt-3">{pinError}</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl mx-auto space-y-8">
       <div>
         <h1 className="font-display text-4xl text-tv-gold mb-4">COUNT NIGHT ADMIN</h1>
-        <label className="block text-sm font-semibold mb-1">Admin PIN</label>
-        <input
-          type="password"
-          value={adminPin}
-          onChange={(e) => setAdminPin(e.target.value)}
-          className="w-48 rounded-md bg-tv-surface2 border border-tv-border px-3 py-2 tracking-widest"
-        />
       </div>
 
       <div className="bg-tv-surface border border-tv-purple rounded-lg p-5 space-y-3">
