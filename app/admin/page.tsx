@@ -30,13 +30,18 @@ export default function AdminPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [roundLabel, setRoundLabel] = useState("");
   const [isLive, setIsLive] = useState(false);
+  const [compSeasonId, setCompSeasonId] = useState("");
+  const [syncRunning, setSyncRunning] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [syncIntervalId, setSyncIntervalId] = useState<ReturnType<typeof setInterval> | null>(null);
 
   async function load() {
-    const [{ data: g }, { data: p }, { data: v }, { data: s }] = await Promise.all([
+    const [{ data: g }, { data: p }, { data: v }, { data: s }, { data: cfg }] = await Promise.all([
       supabase.from("brownlow_games").select("*").order("match_date"),
       supabase.from("afl_players").select("id, full_name, team").eq("active", true).order("full_name"),
       supabase.from("brownlow_votes").select("game_id, afl_player_id, votes"),
       supabase.from("live_count_state").select("*").eq("id", 1).single(),
+      supabase.from("draft_config").select("afl_compseason_id").eq("id", 1).single(),
     ]);
     setGames(g ?? []);
     setPlayers(p ?? []);
@@ -45,9 +50,56 @@ export default function AdminPage() {
       setRoundLabel(s.updated_through_round ?? "");
       setIsLive(s.is_live);
     }
+    if (cfg?.afl_compseason_id) setCompSeasonId(String(cfg.afl_compseason_id));
   }
 
-  useEffect(() => { load(); }, []);
+  async function saveCompSeasonId() {
+    setStatus(null);
+    const res = await fetch("/api/admin/comp-season", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminPin, compSeasonId: Number(compSeasonId) }),
+    });
+    const json = await res.json();
+    setStatus(res.ok ? "Season ID saved." : json.error);
+  }
+
+  async function runSyncOnce() {
+    const res = await fetch("/api/sync/afl-votes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminPin }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setStatus(json.error);
+      setLastSync(`Error at ${new Date().toLocaleTimeString()}`);
+    } else {
+      setLastSync(`${json.matched} of your drafted players updated — ${new Date().toLocaleTimeString()}`);
+    }
+  }
+
+  function startAutoSync() {
+    if (syncRunning) return;
+    setSyncRunning(true);
+    runSyncOnce(); // run immediately, don't wait for the first interval tick
+    const id = setInterval(runSyncOnce, 15000); // every 15s — plenty fast for a live count
+    setSyncIntervalId(id);
+  }
+
+  function stopAutoSync() {
+    if (syncIntervalId) clearInterval(syncIntervalId);
+    setSyncIntervalId(null);
+    setSyncRunning(false);
+  }
+
+  useEffect(() => {
+    load();
+    return () => {
+      if (syncIntervalId) clearInterval(syncIntervalId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const gamePlayers = useMemo(() => {
     if (!selectedGame) return [];
@@ -98,6 +150,49 @@ export default function AdminPage() {
           onChange={(e) => setAdminPin(e.target.value)}
           className="w-48 rounded-md bg-tv-surface2 border border-tv-border px-3 py-2 tracking-widest"
         />
+      </div>
+
+      <div className="bg-tv-surface border border-tv-purple rounded-lg p-5 space-y-3">
+        <h2 className="font-semibold text-tv-gold">Live AFL sync (count night)</h2>
+        <p className="text-sm text-tv-muted">
+          On the night, find the new season&apos;s compSeason id (same dev-tools trick we used
+          for the 2025 one), drop it in below, then hit Start. This polls AFL&apos;s API every
+          15s and updates the ladder automatically — nothing else to do after that.
+        </p>
+        <div className="flex gap-3 items-center flex-wrap">
+          <input
+            type="number"
+            placeholder="compSeason id, e.g. 89"
+            value={compSeasonId}
+            onChange={(e) => setCompSeasonId(e.target.value)}
+            className="w-48 rounded-md bg-tv-surface2 border border-tv-border px-3 py-2"
+          />
+          <button
+            onClick={saveCompSeasonId}
+            className="rounded-md bg-tv-surface2 border border-tv-border hover:bg-tv-purple px-4 py-2 text-sm font-semibold"
+          >
+            Save season ID
+          </button>
+        </div>
+        <div className="flex gap-3 items-center">
+          {!syncRunning ? (
+            <button
+              onClick={startAutoSync}
+              className="rounded-md bg-tv-gold text-tv-bg px-4 py-2 text-sm font-bold hover:brightness-110"
+            >
+              ▶ Start live sync
+            </button>
+          ) : (
+            <button
+              onClick={stopAutoSync}
+              className="rounded-md bg-red-600 text-white px-4 py-2 text-sm font-bold hover:brightness-110"
+            >
+              ■ Stop live sync
+            </button>
+          )}
+          {syncRunning && <span className="text-xs text-tv-gold animate-pulse">● syncing every 15s</span>}
+        </div>
+        {lastSync && <p className="text-xs text-tv-muted">{lastSync}</p>}
       </div>
 
       <div className="bg-tv-surface border border-tv-border rounded-lg p-5 space-y-3">
