@@ -1,7 +1,13 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-export const revalidate = 30; // static-ish, refreshes every 30s during the draft itself
-
+interface Entrant {
+  id: string;
+  name: string;
+  draft_position: number;
+}
 interface DraftBoardRow {
   pick_number: number;
   round: number;
@@ -11,21 +17,42 @@ interface DraftBoardRow {
   team: string;
   multiplier: number;
 }
+interface DraftConfig {
+  total_rounds: number;
+  round_multipliers: Record<string, number>;
+  draft_status: string;
+}
 
-export default async function HomePage() {
-  const { data: entrants } = await supabase
-    .from("entrants")
-    .select("id, name, draft_position")
-    .order("draft_position", { ascending: true });
+export default function HomePage() {
+  const [entrants, setEntrants] = useState<Entrant[]>([]);
+  const [picks, setPicks] = useState<DraftBoardRow[]>([]);
+  const [config, setConfig] = useState<DraftConfig | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
-  const { data: picks } = await supabase
-    .from("draft_board")
-    .select("*")
-    .returns<DraftBoardRow[]>();
+  async function loadData() {
+    const [{ data: e }, { data: p }, { data: c }] = await Promise.all([
+      supabase.from("entrants").select("id, name, draft_position").order("draft_position", { ascending: true }),
+      supabase.from("draft_board").select("*").returns<DraftBoardRow[]>(),
+      supabase.from("draft_config").select("*").eq("id", 1).single(),
+    ]);
+    setEntrants(e ?? []);
+    setPicks(p ?? []);
+    setConfig(c ?? null);
+    setLoaded(true);
+  }
 
-  const { data: config } = await supabase.from("draft_config").select("*").eq("id", 1).single();
+  useEffect(() => {
+    loadData();
+    // Poll every 5s so picks show up live for everyone watching during the draft
+    const interval = setInterval(loadData, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
-  if (!entrants || entrants.length === 0) {
+  if (!loaded) {
+    return <p className="text-tv-muted text-center py-24">Loading…</p>;
+  }
+
+  if (entrants.length === 0) {
     return (
       <div className="text-center py-24">
         <h1 className="font-display text-4xl text-tv-gold mb-2">DRAFT BOARD</h1>
@@ -40,9 +67,8 @@ export default async function HomePage() {
   const rounds = Array.from({ length: totalRounds }, (_, i) => i + 1);
   const multipliers = config?.round_multipliers ?? {};
 
-  // Build a lookup: [draft_position][round] -> pick
   const grid: Record<number, Record<number, DraftBoardRow>> = {};
-  (picks ?? []).forEach((p) => {
+  picks.forEach((p) => {
     grid[p.draft_position] ??= {};
     grid[p.draft_position][p.round] = p;
   });
@@ -51,7 +77,8 @@ export default async function HomePage() {
     <div>
       <div className="mb-6 flex items-baseline justify-between">
         <h1 className="font-display text-4xl text-tv-gold tracking-wide">DRAFT BOARD</h1>
-        <span className="text-sm uppercase tracking-wider text-tv-muted">
+        <span className="text-sm uppercase tracking-wider text-tv-muted flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-tv-gold animate-pulse" />
           Status: <span className="text-tv-purpleLight">{config?.draft_status ?? "not started"}</span>
         </span>
       </div>
